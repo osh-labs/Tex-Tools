@@ -1,6 +1,6 @@
-# Textile Engineering Scripts
+# Tex-Tools
 
-This repository is a collection of textile engineering tools and scripts used for research and development of caving, climbing, and rescue gear.
+A collection of textile engineering tools used for research and development of caving, climbing, and rescue gear.
 
 Owner: Southeast Expedition Medical, LLC, Chris Lee
 
