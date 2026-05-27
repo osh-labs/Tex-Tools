@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bartack.py — Bartack Design Strength Calculator
+bartack-calc.py — Bartack Design Strength Calculator
 ================================================
 Calculates the design strength of a bartack on webbing-on-webbing joints.
 Models two failure paths: thread shear and tear-out. Returns governing (minimum) strength.
@@ -9,18 +9,18 @@ SCOPE: Webbing-on-webbing joints only. Not valid for webbing-to-fabric joints.
 All results are design estimates. Validate with destructive testing before use.
 
 Usage (interactive):
-    python bartack.py
+    python bartack-calc.py
 
 Usage (argparse / scriptable):
-    python bartack.py \\
+    python bartack-calc.py \\
         --joint lap \\
         --thread 69 \\
         --webbing 1in_nylon_flat \\
         --tack-length "1.0 in" \\
         --tack-width "0.5 in" \\
-        --straight-rows 4 \\
-        --zigzag-passes 2 \\
-        --stitch-pitch "2.0 mm" \\
+        --straight-rows 2 \\
+        --zigzag-passes 1 \\
+        --total-stitches 42 \\
         --layers 2 \\
         --load-angle 0 \\
         --peel \\
@@ -310,7 +310,7 @@ class TackGeometry:
     tack_width_mm: float     # Short axis, across webbing width
     n_straight_rows: int     # Count of straight stitch rows
     n_zigzag_passes: int     # Count of zigzag passes
-    stitch_pitch_mm: float   # Center-to-center stitch spacing, mm
+    total_stitches: int      # Total stitch count across full tack pattern
     layer_count: int         # Total webbing layers through tack
     webbing_thickness_mm: float  # Per-layer thickness from webbing spec
     load_angle_deg: float    # Load direction re: tack long axis (0 = longitudinal)
@@ -327,16 +327,22 @@ class TackGeometry:
     def perimeter_mm(self) -> float:
         return 2.0 * (self.tack_length_mm + self.tack_width_mm)
 
-    def stitches_per_row(self) -> int:
-        """Stitch count per straight row, derived from length and pitch."""
-        return max(1, int(self.tack_length_mm / self.stitch_pitch_mm))
+    def total_pattern_lines(self) -> int:
+        """Total stitch lines that run along tack length (rows + zigzag passes)."""
+        return self.n_straight_rows + self.n_zigzag_passes
+
+    def stitch_pitch_mm(self) -> float:
+        """Derived stitch pitch based on length and total stitch count."""
+        lines = max(1, self.total_pattern_lines())
+        return (self.tack_length_mm * lines) / max(1, self.total_stitches)
 
     def total_straight_stitches(self) -> int:
-        return self.n_straight_rows * self.stitches_per_row()
+        lines = max(1, self.total_pattern_lines())
+        return int(round(self.total_stitches * self.n_straight_rows / lines))
 
     def total_zigzag_stitches(self) -> int:
-        # Zigzag pass covers the same length; each stitch spans pitch distance
-        return self.n_zigzag_passes * self.stitches_per_row()
+        # Remainder assignment keeps straight + zigzag equal to total_stitches.
+        return self.total_stitches - self.total_straight_stitches()
 
     def total_stitch_count(self) -> int:
         return self.total_straight_stitches() + self.total_zigzag_stitches()
@@ -473,6 +479,8 @@ def calc_thread_shear(thread: Thread, geometry: TackGeometry,
         "k_angle": round(k_ang, 3),
         "k_peel": round(k_peel, 3),
         "k_zz": K_ZZ,
+        "total_stitches": geometry.total_stitch_count(),
+        "stitch_pitch_mm": round(geometry.stitch_pitch_mm(), 3),
         "n_straight_stitches": n_str,
         "n_zigzag_stitches": n_zz,
         "f_straight_n": round(f_straight, 1),
@@ -707,6 +715,8 @@ def format_report(r: BartackResult) -> str:
     lines.append(f"  K_peel              : {d['k_peel']:.3f}")
     lines.append(f"  K_zz  (zigzag pen.) : {d['k_zz']:.2f}  "
                  f"(applied to {d['n_zigzag_stitches']} zigzag stitches)")
+    lines.append(f"  Total Stitches      : {d['total_stitches']}")
+    lines.append(f"  Derived Pitch       : {d['stitch_pitch_mm']:.3f} mm")
     lines.append(f"  Straight stitches   : {d['n_straight_stitches']}")
     lines.append("")
     lines.append("--- Failure Mode Results ---")
@@ -860,24 +870,33 @@ def interactive_mode() -> BartackResult:
 
     while True:
         try:
-            n_str = int(prompt("Number of straight stitch rows", default=4))
+            n_str = int(prompt("Number of straight stitch rows", default=2))
+            if n_str < 0:
+                raise ValueError()
             break
         except ValueError:
-            print("  Enter an integer.")
+            print("  Enter an integer >= 0.")
 
     while True:
         try:
-            n_zz = int(prompt("Number of zigzag passes", default=2))
+            n_zz = int(prompt("Number of zigzag passes", default=1))
+            if n_zz < 0:
+                raise ValueError()
             break
         except ValueError:
-            print("  Enter an integer.")
+            print("  Enter an integer >= 0.")
 
     while True:
         try:
-            pitch = parse_value_unit(prompt("Stitch pitch", default="2.0 mm"), "length")
+            total_stitches = int(prompt("Total stitches in tack pattern"))
+            if total_stitches <= 0:
+                raise ValueError()
+            if (n_str + n_zz) <= 0:
+                print("  Straight rows + zigzag passes must be > 0.")
+                continue
             break
-        except ValueError as e:
-            print(f"  {e}")
+        except ValueError:
+            print("  Enter a positive integer.")
 
     while True:
         try:
@@ -911,7 +930,7 @@ def interactive_mode() -> BartackResult:
         tack_width_mm=tw,
         n_straight_rows=n_str,
         n_zigzag_passes=n_zz,
-        stitch_pitch_mm=pitch,
+        total_stitches=total_stitches,
         layer_count=layers,
         webbing_thickness_mm=webbing.thickness_mm,
         load_angle_deg=angle,
@@ -926,7 +945,7 @@ def interactive_mode() -> BartackResult:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="bartack.py",
+        prog="bartack-calc.py",
         description=(
             "Bartack design strength calculator. "
             "Models thread shear and tear-out failure paths for "
@@ -952,12 +971,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Tack length along load axis (e.g. '1.0 in')")
     p.add_argument("--tack-width", metavar="'VAL UNIT'",
                    help="Tack width across webbing (e.g. '0.5 in')")
-    p.add_argument("--straight-rows", type=int, default=4,
-                   help="Number of straight stitch rows (default: 4)")
-    p.add_argument("--zigzag-passes", type=int, default=2,
-                   help="Number of zigzag passes (default: 2)")
-    p.add_argument("--stitch-pitch", metavar="'VAL UNIT'", default="2.0 mm",
-                   help="Stitch pitch center-to-center (default: '2.0 mm')")
+    p.add_argument("--total-stitches", type=int,
+                   help="Total stitches across the full tack pattern")
+    p.add_argument("--straight-rows", type=int, default=2,
+                   help="Number of straight stitch rows (default: 2)")
+    p.add_argument("--zigzag-passes", type=int, default=1,
+                   help="Number of zigzag passes (default: 1)")
     p.add_argument("--layers", type=int, default=2,
                    help="Total webbing layers through tack (default: 2)")
     p.add_argument("--load-angle", type=float, default=0.0,
@@ -1016,9 +1035,19 @@ def main():
             webbing = get_webbing(args.webbing)
             tl = parse_value_unit(args.tack_length, "length")
             tw = parse_value_unit(args.tack_width, "length")
-            pitch = parse_value_unit(args.stitch_pitch, "length")
         except ValueError as e:
             parser.error(str(e))
+
+        if args.total_stitches is None:
+            parser.error("Missing required argument: --total-stitches")
+        if args.total_stitches <= 0:
+            parser.error("--total-stitches must be > 0")
+        if args.straight_rows < 0:
+            parser.error("--straight-rows must be >= 0")
+        if args.zigzag_passes < 0:
+            parser.error("--zigzag-passes must be >= 0")
+        if (args.straight_rows + args.zigzag_passes) <= 0:
+            parser.error("--straight-rows + --zigzag-passes must be > 0")
 
         geometry = TackGeometry(
             joint_type=args.joint,
@@ -1026,7 +1055,7 @@ def main():
             tack_width_mm=tw,
             n_straight_rows=args.straight_rows,
             n_zigzag_passes=args.zigzag_passes,
-            stitch_pitch_mm=pitch,
+            total_stitches=args.total_stitches,
             layer_count=args.layers,
             webbing_thickness_mm=webbing.thickness_mm,
             load_angle_deg=args.load_angle,

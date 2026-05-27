@@ -1,6 +1,6 @@
 # Bartack Design Strength Calculator
 
-This folder contains a single script, `bartack.py`, used to estimate bartack joint strength for **webbing-on-webbing** joints.
+This folder contains a single script, `bartack-calc.py`, used to estimate bartack joint strength for **webbing-on-webbing** joints.
 
 The calculator evaluates two failure paths and reports the governing (minimum) design strength:
 
@@ -43,7 +43,7 @@ The script includes:
 Run with no required CLI arguments:
 
 ```bash
-python bartack.py
+python bartack-calc.py
 ```
 
 The script prompts for all inputs and prints a formatted report.
@@ -53,15 +53,15 @@ The script prompts for all inputs and prints a formatted report.
 Example:
 
 ```bash
-python bartack.py \
+python bartack-calc.py \
   --joint lap \
   --thread 69 \
   --webbing 1in_nylon_flat \
   --tack-length "1.0 in" \
   --tack-width "0.5 in" \
-  --straight-rows 4 \
-  --zigzag-passes 2 \
-  --stitch-pitch "2.0 mm" \
+  --total-stitches 42 \
+  --straight-rows 2 \
+  --zigzag-passes 1 \
   --layers 2 \
   --load-angle 0 \
   --peel \
@@ -78,12 +78,12 @@ Required (for non-interactive mode):
 - `--webbing KEY`
 - `--tack-length "VAL UNIT"`
 - `--tack-width "VAL UNIT"`
+- `--total-stitches COUNT`
 
 Common optional:
 
-- `--straight-rows` (default: `4`)
-- `--zigzag-passes` (default: `2`)
-- `--stitch-pitch "VAL UNIT"` (default: `2.0 mm`)
+- `--straight-rows` (default: `2`)
+- `--zigzag-passes` (default: `1`)
 - `--layers` (default: `2`)
 - `--load-angle` (default: `0`)
 - `--peel` (flag)
@@ -126,7 +126,7 @@ Includes:
 Use:
 
 ```bash
-python bartack.py ... --output json
+python bartack-calc.py ... --output json
 ```
 
 Returns structured fields under:
@@ -148,22 +148,22 @@ Returns structured fields under:
 List available thread keys:
 
 ```bash
-python bartack.py --list-threads
+python bartack-calc.py --list-threads
 ```
 
 List available webbing keys:
 
 ```bash
-python bartack.py --list-webbings
+python bartack-calc.py --list-webbings
 ```
 
 Print built-in help:
 
 ```bash
-python bartack.py --help
+python bartack-calc.py --help
 ```
 
 ## File Layout
 
-- `bartack.py` - calculator implementation and CLI entry point
+- `bartack-calc.py` - calculator implementation and CLI entry point
 - `README.md` - usage and model notes
