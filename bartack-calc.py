@@ -848,7 +848,7 @@ def print_report_rich(r: BartackResult) -> None:
 
     console.print(Panel.fit("[bold cyan]Bartack Design Strength Report[/bold cyan]", border_style="cyan"))
 
-    inputs = Table(title="Inputs", box=None)
+    inputs = Table(box=None, show_header=False)
     inputs.add_column("Field", style="bold")
     inputs.add_column("Value")
     inputs.add_row("Joint Type", r.joint_type.upper())
@@ -862,10 +862,10 @@ def print_report_rich(r: BartackResult) -> None:
     inputs.add_row("Layers", str(r.layer_count))
     inputs.add_row("Load Angle", f"{r.load_angle_deg:.1f} deg")
     inputs.add_row("Peel", "Yes" if r.peel else "No")
-    console.print(inputs)
+    inputs.add_row("", "")
 
     d = r.thread_shear_detail
-    corr = Table(title="Thread Shear Factors", box=None)
+    corr = Table(box=None, show_header=False)
     corr.add_column("Factor", style="bold")
     corr.add_column("Value")
     corr.add_row("K_sl", f"{d['k_sl']:.3f}")
@@ -876,10 +876,18 @@ def print_report_rich(r: BartackResult) -> None:
     corr.add_row("Derived Pitch", f"{d['stitch_pitch_mm']:.3f} mm")
     corr.add_row("Straight Stitches", str(d['n_straight_stitches']))
     corr.add_row("Zigzag Stitches", str(d['n_zigzag_stitches']))
-    console.print(corr)
+
+    top_grid = Table.grid(expand=True)
+    top_grid.add_column(ratio=1)
+    top_grid.add_column(ratio=1)
+    top_grid.add_row(
+        Panel(inputs, title="Inputs", border_style="blue"),
+        Panel(corr, title="Thread Shear Factors", border_style="red"),
+    )
+    console.print(top_grid)
 
     governing_style = "bold green" if r.governing_mode == "Thread Shear" else "bold yellow"
-    results = Table(title="Results", box=None)
+    results = Table(title="Results", box=None, expand=True)
     results.add_column("Metric", style="bold")
     results.add_column("Value")
     results.add_row("Thread Shear", f"{r.thread_shear_n:,.1f} N ({r.thread_shear_lbf:,.1f} lbf)")
@@ -888,7 +896,7 @@ def print_report_rich(r: BartackResult) -> None:
     results.add_row("Design Strength", f"{r.design_strength_n:,.1f} N ({r.design_strength_lbf:,.1f} lbf)")
     results.add_row("Safety Factor", f"{r.safety_factor:.1f}")
     results.add_row("Allowable Load", f"{r.allowable_load_n:,.1f} N ({r.allowable_load_lbf:,.1f} lbf)")
-    console.print(results)
+    console.print(Panel(results, border_style="green"))
 
     warn_style = "yellow" if r.warnings else "green"
     warn_title = "Warnings & Assumptions"
