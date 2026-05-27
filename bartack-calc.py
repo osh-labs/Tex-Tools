@@ -39,6 +39,25 @@ import sys
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+    from rich.table import Table
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
+try:
+    from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.completion import WordCompleter
+    AUTOCOMPLETE_AVAILABLE = True
+except ImportError:
+    AUTOCOMPLETE_AVAILABLE = False
+
+
+console = Console() if RICH_AVAILABLE else None
+
 
 # =============================================================================
 # UNITS
@@ -297,6 +316,68 @@ def list_available_webbings() -> list:
             f"shear: {shear_note}"
         )
     return lines
+
+
+def print_banner() -> None:
+    """Print a styled banner when Rich is available."""
+    if RICH_AVAILABLE:
+        console.print(
+            Panel.fit(
+                "[bold cyan]Bartack Design Strength Calculator[/bold cyan]\n"
+                "Webbing-on-webbing joints only",
+                border_style="cyan",
+            )
+        )
+    else:
+        print()
+        print("=" * 50)
+        print("  BARTACK DESIGN STRENGTH CALCULATOR")
+        print("=" * 50)
+
+
+def print_option_table(title: str, columns: list, rows: list) -> None:
+    """Render a simple table with Rich, or plain text fallback."""
+    if RICH_AVAILABLE:
+        table = Table(title=title)
+        for c in columns:
+            table.add_column(c)
+        for row in rows:
+            table.add_row(*row)
+        console.print(table)
+    else:
+        print(title)
+        for row in rows:
+            print("  " + " | ".join(row))
+
+
+def prompt_autocomplete(msg: str, options: list, default: Optional[str] = None) -> str:
+    """Prompt with tab-completion when prompt_toolkit is available."""
+    if AUTOCOMPLETE_AVAILABLE:
+        default_text = str(default) if default is not None else ""
+        text = pt_prompt(
+            f"{msg}{f' [{default}]' if default is not None else ''}: ",
+            completer=WordCompleter(options, ignore_case=True, match_middle=True),
+            complete_while_typing=True,
+            default=default_text,
+        ).strip()
+        if text == "" and default is not None:
+            return str(default)
+        return text
+    return prompt(msg, default=default)
+
+
+def normalize_key_choice(raw: str, valid_keys: list, aliases: Optional[dict] = None) -> str:
+    """Resolve user selection against canonical keys and optional aliases."""
+    txt = raw.strip()
+    txt_low = txt.lower()
+    key_map = {k.lower(): k for k in valid_keys}
+    if txt_low in key_map:
+        return key_map[txt_low]
+    if aliases:
+        alias_map = {k.lower(): v for k, v in aliases.items()}
+        if txt_low in alias_map:
+            return alias_map[txt_low]
+    raise ValueError(f"Unknown selection '{raw}'.")
 
 
 # =============================================================================
@@ -759,6 +840,62 @@ def format_report(r: BartackResult) -> str:
     return "\n".join(lines)
 
 
+def print_report_rich(r: BartackResult) -> None:
+    """Render a richer, more readable report for terminal users."""
+    if not RICH_AVAILABLE:
+        print(format_report(r))
+        return
+
+    console.print(Panel.fit("[bold cyan]Bartack Design Strength Report[/bold cyan]", border_style="cyan"))
+
+    inputs = Table(title="Inputs", box=None)
+    inputs.add_column("Field", style="bold")
+    inputs.add_column("Value")
+    inputs.add_row("Joint Type", r.joint_type.upper())
+    inputs.add_row("Thread", r.thread_name)
+    inputs.add_row("Webbing", r.webbing_name)
+    inputs.add_row(
+        "Tack Dimensions",
+        f"{r.tack_length_mm:.1f} mm x {r.tack_width_mm:.1f} mm"
+        f" ({from_mm(r.tack_length_mm, 'in'):.3f} in x {from_mm(r.tack_width_mm, 'in'):.3f} in)",
+    )
+    inputs.add_row("Layers", str(r.layer_count))
+    inputs.add_row("Load Angle", f"{r.load_angle_deg:.1f} deg")
+    inputs.add_row("Peel", "Yes" if r.peel else "No")
+    console.print(inputs)
+
+    d = r.thread_shear_detail
+    corr = Table(title="Thread Shear Factors", box=None)
+    corr.add_column("Factor", style="bold")
+    corr.add_column("Value")
+    corr.add_row("K_sl", f"{d['k_sl']:.3f}")
+    corr.add_row("K_ang", f"{d['k_angle']:.3f}")
+    corr.add_row("K_peel", f"{d['k_peel']:.3f}")
+    corr.add_row("K_zz", f"{d['k_zz']:.2f}")
+    corr.add_row("Total Stitches", str(d['total_stitches']))
+    corr.add_row("Derived Pitch", f"{d['stitch_pitch_mm']:.3f} mm")
+    corr.add_row("Straight Stitches", str(d['n_straight_stitches']))
+    corr.add_row("Zigzag Stitches", str(d['n_zigzag_stitches']))
+    console.print(corr)
+
+    governing_style = "bold green" if r.governing_mode == "Thread Shear" else "bold yellow"
+    results = Table(title="Results", box=None)
+    results.add_column("Metric", style="bold")
+    results.add_column("Value")
+    results.add_row("Thread Shear", f"{r.thread_shear_n:,.1f} N ({r.thread_shear_lbf:,.1f} lbf)")
+    results.add_row("Tear-Out", f"{r.tear_out_n:,.1f} N ({r.tear_out_lbf:,.1f} lbf) [upper bound]")
+    results.add_row("Governing Mode", f"[{governing_style}]{r.governing_mode}[/{governing_style}]")
+    results.add_row("Design Strength", f"{r.design_strength_n:,.1f} N ({r.design_strength_lbf:,.1f} lbf)")
+    results.add_row("Safety Factor", f"{r.safety_factor:.1f}")
+    results.add_row("Allowable Load", f"{r.allowable_load_n:,.1f} N ({r.allowable_load_lbf:,.1f} lbf)")
+    console.print(results)
+
+    warn_style = "yellow" if r.warnings else "green"
+    warn_title = "Warnings & Assumptions"
+    warn_text = "\n".join([f"[{i}] {w}" for i, w in enumerate(r.warnings, 1)]) or "None"
+    console.print(Panel(warn_text, title=warn_title, border_style=warn_style))
+
+
 def result_to_json(r: BartackResult) -> str:
     """Serialize result to JSON for piping to other scripts."""
     data = {
@@ -798,6 +935,10 @@ def result_to_json(r: BartackResult) -> str:
 # =============================================================================
 
 def prompt(msg: str, default=None) -> str:
+    if RICH_AVAILABLE:
+        if default is not None:
+            return Prompt.ask(msg, default=str(default)).strip()
+        return Prompt.ask(msg).strip()
     if default is not None:
         msg = f"{msg} [{default}]: "
     else:
@@ -809,43 +950,63 @@ def prompt(msg: str, default=None) -> str:
 
 
 def interactive_mode() -> BartackResult:
-    print()
-    print("=" * 50)
-    print("  BARTACK DESIGN STRENGTH CALCULATOR")
-    print("=" * 50)
-    print()
-    print("NOTE: This tool models webbing-on-webbing joints only.")
-    print("      Not valid for webbing-to-fabric joints.")
-    print()
+    print_banner()
+    if RICH_AVAILABLE:
+        console.print("[dim]This tool models webbing-on-webbing joints only.[/dim]")
+        console.print("[dim]Not valid for webbing-to-fabric joints.[/dim]\n")
+    else:
+        print("NOTE: This tool models webbing-on-webbing joints only.")
+        print("      Not valid for webbing-to-fabric joints.")
+        print()
 
     # Joint type
     while True:
-        jt = prompt("Joint type (lap / loop)").lower()
+        jt = prompt("Joint type (lap / loop)", default="lap").lower()
         if jt in ("lap", "loop"):
             break
         print("  Enter 'lap' or 'loop'.")
 
     # Thread
-    print()
-    print("Available threads:")
-    for line in list_available_threads():
-        print(f"  {line}")
+    thread_aliases = {v.name: k for k, v in _THREAD_TABLE.items()}
+    thread_options = sorted(set(list(_THREAD_TABLE.keys()) + list(thread_aliases.keys())))
+    thread_rows = [
+        [k, v.name, f"{v.breaking_strength_n:.1f} N", f"{from_newtons(v.breaking_strength_n, 'lbf'):.1f} lbf", f"{v.diameter_mm:.2f} mm"]
+        for k, v in _THREAD_TABLE.items()
+    ]
+    print_option_table(
+        "Available Threads",
+        ["Key", "Name", "Break (N)", "Break (lbf)", "Dia"],
+        thread_rows,
+    )
+    if AUTOCOMPLETE_AVAILABLE and RICH_AVAILABLE:
+        console.print("[dim]Tip: use Tab to autocomplete thread keys or names.[/dim]")
     while True:
-        t_key = prompt("Thread size (e.g. 69, 138)")
+        t_raw = prompt_autocomplete("Thread size or name", thread_options)
         try:
+            t_key = normalize_key_choice(t_raw, list(_THREAD_TABLE.keys()), aliases=thread_aliases)
             thread = get_thread(t_key)
             break
         except ValueError as e:
             print(f"  {e}")
 
     # Webbing
-    print()
-    print("Available webbings:")
-    for line in list_available_webbings():
-        print(f"  {line}")
+    webbing_aliases = {v.name: k for k, v in _WEBBING_TABLE.items()}
+    webbing_options = sorted(set(list(_WEBBING_TABLE.keys()) + list(webbing_aliases.keys())))
+    webbing_rows = [
+        [k, v.name, f"{v.width_mm:.1f} mm", f"{v.tensile_strength_n:.0f} N", v.material]
+        for k, v in _WEBBING_TABLE.items()
+    ]
+    print_option_table(
+        "Available Webbings",
+        ["Key", "Name", "Width", "Tensile", "Material"],
+        webbing_rows,
+    )
+    if AUTOCOMPLETE_AVAILABLE and RICH_AVAILABLE:
+        console.print("[dim]Tip: use Tab to autocomplete webbing keys or names.[/dim]")
     while True:
-        w_key = prompt("Webbing key (e.g. 1in_nylon_flat)")
+        w_raw = prompt_autocomplete("Webbing key or name", webbing_options)
         try:
+            w_key = normalize_key_choice(w_raw, list(_WEBBING_TABLE.keys()), aliases=webbing_aliases)
             webbing = get_webbing(w_key)
             break
         except ValueError as e:
@@ -1072,7 +1233,7 @@ def main():
     if output_fmt == "json":
         print(result_to_json(result))
     else:
-        print(format_report(result))
+        print_report_rich(result)
 
 
 if __name__ == "__main__":

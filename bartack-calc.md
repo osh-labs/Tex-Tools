@@ -34,7 +34,10 @@ The script includes:
 ## Requirements
 
 - Python 3.8+
-- Standard library only (no external packages required)
+- Rich (`pip install rich`) for improved terminal UI
+- prompt_toolkit (`pip install prompt_toolkit`) for interactive autocompletion
+
+If `rich` or `prompt_toolkit` are not installed, the script falls back to plain terminal prompts/output.
 
 ## Run Modes
 
@@ -47,6 +50,7 @@ python bartack-calc.py
 ```
 
 The script prompts for all inputs and prints a formatted report.
+Thread and webbing prompts support Tab autocompletion (keys and names) when `prompt_toolkit` is installed.
 
 ### 2) CLI / scriptable mode
 
