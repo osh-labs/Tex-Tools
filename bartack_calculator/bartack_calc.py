@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# bartack-calc.py - Bartack design strength calculator for webbing joints
+# bartack_calc.py - Bartack design strength calculator for webbing joints
 # Copyright (C) 2026 Southeast Expedition Medical, LLC, Chris Lee
 #
 # This program is free software: you can redistribute it and/or modify
@@ -17,7 +17,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 """
-bartack-calc.py — Bartack Design Strength Calculator
+bartack_calc.py — Bartack Design Strength Calculator
 ================================================
 Calculates the design strength of a bartack on webbing-on-webbing joints.
 Models two failure paths: thread shear and tear-out. Returns governing (minimum) strength.
@@ -53,8 +53,9 @@ Usage (argparse / scriptable):
 import argparse
 import json
 import sys
-from dataclasses import dataclass, asdict
-from typing import Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 try:
     from rich.console import Console
@@ -166,80 +167,6 @@ class Thread:
     elongation_assumed: bool     # True if elongation is a default assumption
 
 
-# Bonded nylon thread lookup table.
-# Breaking strength values from Coats Industrial thread specs (tex-based bonded nylon).
-# Diameter values are nominal estimates; verify against actual spool specs.
-# Elongation at break: 0.20 default where not published (assumption A7).
-_THREAD_TABLE = {
-    "69": Thread(
-        name="Bonded Nylon #69",
-        size_designation="69",
-        breaking_strength_n=53.4,    # ~12 lbf
-        diameter_mm=0.40,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-    "138": Thread(
-        name="Bonded Nylon #138",
-        size_designation="138",
-        breaking_strength_n=106.8,   # ~24 lbf
-        diameter_mm=0.55,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-    "207": Thread(
-        name="Bonded Nylon #207",
-        size_designation="207",
-        breaking_strength_n=160.1,   # ~36 lbf
-        diameter_mm=0.67,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-    "277": Thread(
-        name="Bonded Nylon #277",
-        size_designation="277",
-        breaking_strength_n=213.5,   # ~48 lbf
-        diameter_mm=0.78,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-    "346": Thread(
-        name="Bonded Nylon #346",
-        size_designation="346",
-        breaking_strength_n=266.9,   # ~60 lbf
-        diameter_mm=0.87,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-    "415": Thread(
-        name="Bonded Nylon #415",
-        size_designation="415",
-        breaking_strength_n=320.3,   # ~72 lbf
-        diameter_mm=0.95,
-        elongation_at_break=0.20,
-        elongation_assumed=True,
-    ),
-}
-
-
-def get_thread(size_designation: str) -> Thread:
-    key = str(size_designation).strip()
-    if key not in _THREAD_TABLE:
-        raise ValueError(
-            f"Unknown thread size '{key}'. Available: {list(_THREAD_TABLE)}"
-        )
-    return _THREAD_TABLE[key]
-
-
-def list_available_threads() -> list:
-    return [
-        f"{k:>6}  {v.name:<30}  break: {v.breaking_strength_n:>7.1f} N "
-        f"({from_newtons(v.breaking_strength_n, 'lbf'):>5.1f} lbf)  "
-        f"dia: {v.diameter_mm:.2f} mm"
-        for k, v in _THREAD_TABLE.items()
-    ]
-
-
 # =============================================================================
 # MATERIALS — WEBBING
 # =============================================================================
@@ -277,40 +204,78 @@ def _make_webbing(name, material, width_mm, tensile_n, thickness_mm, constructio
     )
 
 
-# Webbing lookup table.
-# Tensile strength values are nominal mil-spec / commercial minimums.
-# Thickness values are nominal estimates; verify against actual material.
-# All shear strengths are von Mises derived (A1) unless noted.
-_WEBBING_TABLE = {
-    "1in_nylon_flat": _make_webbing(
-        "1-inch Nylon Flat Webbing (MIL-W-4088)",
-        "nylon", 25.4, 13344.7, 1.5, "flat"        # 3,000 lbf min
-    ),
-    "1.5in_nylon_flat": _make_webbing(
-        "1.5-inch Nylon Flat Webbing",
-        "nylon", 38.1, 20017.0, 1.8, "flat"         # 4,500 lbf min
-    ),
-    "2in_nylon_flat": _make_webbing(
-        "2-inch Nylon Flat Webbing (MIL-W-4088)",
-        "nylon", 50.8, 26689.3, 2.2, "flat"         # 6,000 lbf min
-    ),
-    "1in_polyester_flat": _make_webbing(
-        "1-inch Polyester Flat Webbing",
-        "polyester", 25.4, 13344.7, 1.5, "flat"     # 3,000 lbf min
-    ),
-    "1in_tubular_nylon": _make_webbing(
-        "1-inch Tubular Nylon Webbing",
-        "tubular_nylon", 25.4, 11120.6, 3.2, "tubular"  # 2,500 lbf min
-    ),
-    "1in_dyneema_flat": _make_webbing(
-        "1-inch Dyneema/Spectra Flat Webbing",
-        "dyneema", 25.4, 22241.1, 1.0, "flat"       # 5,000 lbf min
-    ),
-    "1in_polypro_flat": _make_webbing(
-        "1-inch Polypropylene Flat Webbing",
-        "polypro", 25.4, 6672.3, 1.6, "flat"        # 1,500 lbf min
-    ),
-}
+MATERIAL_LIBRARY_PATH = Path(__file__).resolve().with_name("materials_library.json")
+
+
+def _load_material_tables(file_path: Path = MATERIAL_LIBRARY_PATH) -> Tuple[Dict[str, Thread], Dict[str, Webbing]]:
+    """Load thread/webbing tables from external JSON for easy field edits."""
+    try:
+        raw = json.loads(file_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Material library file was not found: {file_path}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Material library JSON parse error in {file_path}: {exc}"
+        ) from exc
+
+    raw_threads = raw.get("threads", {})
+    raw_webbings = raw.get("webbings", {})
+    if not raw_threads or not raw_webbings:
+        raise RuntimeError(
+            f"Material library must include non-empty 'threads' and 'webbings' maps: {file_path}"
+        )
+
+    thread_table: Dict[str, Thread] = {}
+    for key, spec in raw_threads.items():
+        thread_table[str(key)] = Thread(
+            name=spec["name"],
+            size_designation=str(spec.get("size_designation", key)),
+            breaking_strength_n=float(spec["breaking_strength_n"]),
+            diameter_mm=float(spec["diameter_mm"]),
+            elongation_at_break=float(spec.get("elongation_at_break", 0.20)),
+            elongation_assumed=bool(spec.get("elongation_assumed", True)),
+        )
+
+    webbing_table: Dict[str, Webbing] = {}
+    for key, spec in raw_webbings.items():
+        webbing_table[str(key)] = _make_webbing(
+            name=spec["name"],
+            material=spec["material"],
+            width_mm=float(spec["width_mm"]),
+            tensile_n=float(spec["tensile_strength_n"]),
+            thickness_mm=float(spec["thickness_mm"]),
+            construction=spec["construction"],
+            shear_n_per_mm=(
+                float(spec["shear_strength_n_per_mm"])
+                if spec.get("shear_strength_n_per_mm") is not None
+                else None
+            ),
+        )
+
+    return thread_table, webbing_table
+
+
+_THREAD_TABLE, _WEBBING_TABLE = _load_material_tables()
+
+
+def get_thread(size_designation: str) -> Thread:
+    key = str(size_designation).strip()
+    if key not in _THREAD_TABLE:
+        raise ValueError(
+            f"Unknown thread size '{key}'. Available: {list(_THREAD_TABLE)}"
+        )
+    return _THREAD_TABLE[key]
+
+
+def list_available_threads() -> list:
+    return [
+        f"{k:>6}  {v.name:<30}  break: {v.breaking_strength_n:>7.1f} N "
+        f"({from_newtons(v.breaking_strength_n, 'lbf'):>5.1f} lbf)  "
+        f"dia: {v.diameter_mm:.2f} mm"
+        for k, v in _THREAD_TABLE.items()
+    ]
 
 
 def get_webbing(key: str) -> Webbing:

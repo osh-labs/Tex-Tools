@@ -17,7 +17,8 @@ These tools are intended to help with:
 
 ## Current Contents
 
-- `bartack-calc.py`: Bartack design strength calculator for webbing-on-webbing joints
+- `bartack_calculator/bartack_calc.py`: Bartack design strength calculator for webbing-on-webbing joints
+- `bartack_calculator/materials_library.json`: User-editable material library for thread and webbing properties
 - `bartack-calc.md`: Detailed usage and model notes for the bartack calculator
 
 ## Safety and Liability Notice

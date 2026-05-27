@@ -1,0 +1,117 @@
+{
+  "threads": {
+    "69": {
+      "name": "Bonded Nylon #69",
+      "size_designation": "69",
+      "breaking_strength_n": 53.4,
+      "diameter_mm": 0.4,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    },
+    "138": {
+      "name": "Bonded Nylon #138",
+      "size_designation": "138",
+      "breaking_strength_n": 106.8,
+      "diameter_mm": 0.55,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    },
+    "207": {
+      "name": "Bonded Nylon #207",
+      "size_designation": "207",
+      "breaking_strength_n": 160.1,
+      "diameter_mm": 0.67,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    },
+    "277": {
+      "name": "Bonded Nylon #277",
+      "size_designation": "277",
+      "breaking_strength_n": 213.5,
+      "diameter_mm": 0.78,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    },
+    "346": {
+      "name": "Bonded Nylon #346",
+      "size_designation": "346",
+      "breaking_strength_n": 266.9,
+      "diameter_mm": 0.87,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    },
+    "415": {
+      "name": "Bonded Nylon #415",
+      "size_designation": "415",
+      "breaking_strength_n": 320.3,
+      "diameter_mm": 0.95,
+      "elongation_at_break": 0.2,
+      "elongation_assumed": true
+    }
+  },
+  "webbings": {
+    "1in_nylon_flat": {
+      "name": "1-inch Nylon Flat Webbing (MIL-W-4088)",
+      "material": "nylon",
+      "width_mm": 25.4,
+      "tensile_strength_n": 13344.7,
+      "thickness_mm": 1.5,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    },
+    "1.5in_nylon_flat": {
+      "name": "1.5-inch Nylon Flat Webbing",
+      "material": "nylon",
+      "width_mm": 38.1,
+      "tensile_strength_n": 20017.0,
+      "thickness_mm": 1.8,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    },
+    "2in_nylon_flat": {
+      "name": "2-inch Nylon Flat Webbing (MIL-W-4088)",
+      "material": "nylon",
+      "width_mm": 50.8,
+      "tensile_strength_n": 26689.3,
+      "thickness_mm": 2.2,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    },
+    "1in_polyester_flat": {
+      "name": "1-inch Polyester Flat Webbing",
+      "material": "polyester",
+      "width_mm": 25.4,
+      "tensile_strength_n": 13344.7,
+      "thickness_mm": 1.5,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    },
+    "1in_tubular_nylon": {
+      "name": "1-inch Tubular Nylon Webbing",
+      "material": "tubular_nylon",
+      "width_mm": 25.4,
+      "tensile_strength_n": 11120.6,
+      "thickness_mm": 3.2,
+      "construction": "tubular",
+      "shear_strength_n_per_mm": null
+    },
+    "1in_dyneema_flat": {
+      "name": "1-inch Dyneema/Spectra Flat Webbing",
+      "material": "dyneema",
+      "width_mm": 25.4,
+      "tensile_strength_n": 22241.1,
+      "thickness_mm": 1.0,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    },
+    "1in_polypro_flat": {
+      "name": "1-inch Polypropylene Flat Webbing",
+      "material": "polypro",
+      "width_mm": 25.4,
+      "tensile_strength_n": 6672.3,
+      "thickness_mm": 1.6,
+      "construction": "flat",
+      "shear_strength_n_per_mm": null
+    }
+  }
+}
