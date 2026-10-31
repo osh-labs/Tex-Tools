@@ -4,10 +4,13 @@ The main script is `bartack_calculator/bartack_calc.py`. Run it directly with `p
 
 Material properties are stored in `bartack_calculator/materials_library.json` so users can edit thread and webbing values without changing code.
 
-The calculator evaluates two failure paths and reports the governing (minimum) design strength:
+The calculator evaluates three failure paths and reports the governing (minimum) design strength:
 
 - Thread shear/tensile failure
-- Webbing tear-out failure
+- Webbing tear-out failure, capped at the webbing's tensile strength
+- Webbing tensile failure at the stitch line (evaluated only when a measured joint efficiency is given)
+
+Results are per joint: no per-leg load split is applied to loop joints.
 
 It then applies a safety factor to provide allowable load.
 
@@ -31,7 +34,50 @@ The script includes:
   - Peel loading (`K_peel`)
   - Zigzag penalty (`K_zz`)
   - Loop fold-edge concentration (`K_fold_edge`)
-- Governing mode selection and warnings for key assumptions (A1-A8)
+- Governing mode selection and warnings for key assumptions (A1-A11)
+
+## Failure modes
+
+| Mode | Formula |
+|---|---|
+| Thread shear | `N_straight * F_break * K_sl * K_angle [* K_peel] + N_zigzag * F_break * K_sl * K_angle [* K_peel] * K_zz` |
+| Tear-out (lap) | `min(2 (L + W) * s * n_side, T * n_side)` |
+| Tear-out (loop) | `min((2 L + W + K_fold_edge W) * s * n_side, T * n_side)` |
+| Webbing tensile | `T * eta * n_side` (only when `eta` is set) |
+
+`s` = webbing shear strength per mm (A1: `0.577 T / width` when not measured), `T` = webbing
+tensile strength, `n_side = max(1, layers // 2)` (A9), `eta` = joint efficiency (sewn-joint /
+plain webbing tensile, 0-1, from destructive test; no default).
+
+## Assumption codes
+
+| Code | Meaning |
+|---|---|
+| A1 | Webbing shear strength derived from tensile via von Mises (0.577) |
+| A2 | Shear lag `K_sl` is an estimate; tack width assumed close to webbing width |
+| A3 | Peel factor 0.50 applied |
+| A5 | Loop joint: result per joint (both legs together), no per-leg split |
+| A6 | Fold-edge factor 0.85 on the fold-side edge (loop tear-out) |
+| A8 | Tear-out governs: upper-bound result |
+| A9 | Layers per side = layers // 2 (min 1); tear-out and webbing break run through one side |
+| A10 | Tear-out capped at webbing tensile x layers per side (physical upper bound) |
+| A11 | Webbing tensile mode not evaluated (joint efficiency not set) |
+
+A4 (zigzag penalty) is applied in the thread shear formula and has no runtime warning. A7
+(thread elongation) was removed: elongation does not enter any formula.
+
+## Changes 2026-10-31
+
+- Tear-out uses layers per side (`layers // 2`, min 1) instead of the total layer count.
+- Tear-out is capped at webbing tensile strength x layers per side. Before the cap, tear-out
+  values could exceed the webbing's own breaking strength (reference case: 18,480 N on a
+  5,338 N webbing), so tear-out could not govern in practice.
+- New mode: webbing tensile at the stitch line, `T * eta * n_side`. `eta` comes from
+  `--joint-efficiency` or the webbing's `joint_efficiency` in the library (default `null`).
+- `K_LOOP` removed. It was defined, and the A5 warning said it was applied, but no code used it.
+  Results are per joint.
+- A7 (thread elongation) warning removed.
+- Reference vectors: `bartack_calculator/reference_vectors.py` / `reference_vectors.json`.
 
 ## Requirements
 
@@ -94,6 +140,7 @@ Common optional:
 - `--load-angle` (default: `0`)
 - `--peel` (flag)
 - `--safety-factor` (default: `3.0`)
+- `--joint-efficiency ETA` (0-1; no default; enables the webbing tensile mode)
 - `--output {human,json}` (default: `human`)
 - `--list-threads`
 - `--list-webbings`
@@ -121,6 +168,7 @@ Edit `bartack_calculator/materials_library.json` to add or change material optio
 - `threads` map key: thread selection key (example: `69`)
 - `webbings` map key: webbing selection key (example: `1in_nylon_flat`)
 - Set `shear_strength_n_per_mm` to `null` to auto-derive shear strength from tensile/width (A1)
+- `joint_efficiency`: measured sewn-joint / plain webbing tensile ratio (0-1); `null` until measured
 - Use valid JSON syntax (double quotes, commas, no trailing commas)
 
 After edits, validate entries with:
@@ -167,6 +215,13 @@ Returns structured fields under:
 
 ## Quick Validation Commands
 
+Check the model against the stored reference vectors (regenerate with `--write` after an
+intentional model change, in the same commit):
+
+```bash
+python3 -I bartack_calculator/reference_vectors.py
+```
+
 List available thread keys:
 
 ```bash
@@ -189,4 +244,5 @@ python bartack_calculator/bartack_calc.py --help
 
 - `bartack_calculator/bartack_calc.py` - calculator entry point and implementation
 - `bartack_calculator/materials_library.json` - user-editable material library
+- `bartack_calculator/reference_vectors.py`, `reference_vectors.json` - model reference cases
 - `README.md` - repository overview
