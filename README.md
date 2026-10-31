@@ -20,6 +20,7 @@ These tools are intended to help with:
 - `bartack_calculator/bartack_calc.py`: Bartack design strength calculator for webbing-on-webbing joints
 - `bartack_calculator/materials_library.json`: User-editable material library for thread and webbing properties
 - `bartack-calc.md`: Detailed usage and model notes for the bartack calculator
+- `bartack_calculator/reference_vectors.py`: Reference cases that pin the bartack model (ports are parity-tested against them)
 
 ## Safety and Liability Notice
 
@@ -43,6 +44,13 @@ Copyleft intent:
 - Derivative works must remain open source under GPL-compatible terms.
 - Source code for derivative distributions must be made available under the same license obligations.
 
+### Separate licence to BartackStudio
+
+The copyright holder has also granted the BartackStudio project a separate, non-GPL licence to
+the bartack calculator (model, code, data and documentation). See
+[`LICENSE-BartackStudio.md`](LICENSE-BartackStudio.md). This does not change the GPL terms for
+anyone else.
+
 ## Contributions
 
 Contributions are welcome if they improve model clarity, engineering transparency, and safety margins.
@@ -52,6 +60,7 @@ When contributing:
 - Clearly document assumptions and limits
 - Prefer conservative defaults in safety-relevant calculations
 - Include validation notes when changing equations or factors
+- Contributions to `bartack_calculator/` must agree to the BartackStudio grant in `LICENSE-BartackStudio.md`
 
 ### Source File Header Framework
 

@@ -42,6 +42,7 @@ Usage (argparse / scriptable):
         --load-angle 0 \\
         --peel \\
         --safety-factor 3.0 \\
+        --joint-efficiency 0.80 \\
         --output human
 
     --output human    : formatted report to stdout (default)
@@ -181,10 +182,11 @@ class Webbing:
     thickness_mm: float
     construction: str       # flat | tubular
     shear_derived: bool     # True if shear strength was derived via von Mises (A1)
+    joint_efficiency: Optional[float] = None  # eta: sewn-joint / plain webbing tensile; None = not measured
 
 
 def _make_webbing(name, material, width_mm, tensile_n, thickness_mm, construction,
-                  shear_n_per_mm=None):
+                  shear_n_per_mm=None, joint_efficiency=None):
     """Helper: derive shear strength via von Mises if not provided (assumption A1)."""
     if shear_n_per_mm is None:
         # A1: shear_strength = (tensile / width) * 0.577  (von Mises criterion)
@@ -201,6 +203,7 @@ def _make_webbing(name, material, width_mm, tensile_n, thickness_mm, constructio
         thickness_mm=thickness_mm,
         construction=construction,
         shear_derived=shear_derived,
+        joint_efficiency=joint_efficiency,
     )
 
 
@@ -250,6 +253,11 @@ def _load_material_tables(file_path: Path = MATERIAL_LIBRARY_PATH) -> Tuple[Dict
             shear_n_per_mm=(
                 float(spec["shear_strength_n_per_mm"])
                 if spec.get("shear_strength_n_per_mm") is not None
+                else None
+            ),
+            joint_efficiency=(
+                float(spec["joint_efficiency"])
+                if spec.get("joint_efficiency") is not None
                 else None
             ),
         )
@@ -384,6 +392,15 @@ class TackGeometry:
     def total_thickness_mm(self) -> float:
         return self.layer_count * self.webbing_thickness_mm
 
+    def layers_per_side(self) -> int:
+        """Layers on one side of the joint (assumption A9).
+
+        A tear-out or webbing break runs through the layers on one side of the joint only, so the
+        layer count is split equally between the two sides; an odd count rounds down
+        (conservative). Minimum 1.
+        """
+        return max(1, self.layer_count // 2)
+
     def effective_shear_area_mm2(self) -> float:
         return self.tack_length_mm * self.tack_width_mm
 
@@ -489,14 +506,6 @@ Applied to zigzag stitch count only. Straight rows use K_zz = 1.0.
 Conservative estimate. Calibrate with stitch pattern comparison tests.
 """
 
-K_LOOP = 0.50
-"""
-Loop joint load split factor. (Assumption A5)
-For loop joints, load is distributed across two webbing legs.
-Applied to the *demand* side (input load), not tack strength.
-Assumes symmetric load distribution between legs.
-"""
-
 K_FOLD_EDGE = 0.85
 """
 Fold edge stress concentration for loop joints. (Assumption A6)
@@ -567,18 +576,24 @@ def calc_tear_out(webbing: Webbing, geometry: TackGeometry) -> tuple:
     If tear-out governs, treat the result with additional caution.
 
     For lap joints:
-        F = perimeter * shear_strength_per_mm * layer_count
+        F = perimeter * shear_strength_per_mm * layers_per_side
 
     For loop joints:
         The fold-side short edge has a stress concentration (K_FOLD_EDGE).
-        Both webbing legs contribute; layer_count includes both legs.
+
+    layers_per_side = layer_count // 2, minimum 1 (assumption A9): the tear path runs through
+    the layers on one side of the joint only.
+
+    Cap (A10): the tear-out load cannot exceed the tensile strength of the webbing it tears out
+    of, so F is limited to tensile_strength * layers_per_side. This is a physical upper bound,
+    not a calibrated value.
 
     Returns (strength_n, detail_dict)
     """
     s = webbing.shear_strength_n_per_mm
     L = geometry.tack_length_mm
     W = geometry.tack_width_mm
-    layers = geometry.layer_count
+    layers = geometry.layers_per_side()
 
     if geometry.joint_type == "lap":
         perimeter = 2.0 * (L + W)
@@ -596,17 +611,54 @@ def calc_tear_out(webbing: Webbing, geometry: TackGeometry) -> tuple:
     else:
         raise ValueError(f"Unknown joint_type '{geometry.joint_type}'")
 
+    uncapped = strength
+    cap = webbing.tensile_strength_n * layers
+    capped = uncapped > cap
+    if capped:
+        strength = cap
+
     detail = {
         "shear_strength_n_per_mm": round(s, 4),
         "shear_derived_von_mises": webbing.shear_derived,
         "tack_length_mm": L,
         "tack_width_mm": W,
-        "layer_count": layers,
+        "layer_count": geometry.layer_count,
+        "layers_per_side": layers,
+        "uncapped_n": round(uncapped, 2),
+        "tensile_cap_n": round(cap, 2),
+        "capped_at_webbing_tensile": capped,
         "fold_reduction_applied": fold_reduction_applied,
         "k_fold_edge": K_FOLD_EDGE if fold_reduction_applied else None,
         "upper_bound": True,
     }
     return strength, detail
+
+
+# =============================================================================
+# FAILURE MODE: WEBBING TENSILE AT THE STITCH LINE
+# =============================================================================
+
+def calc_webbing_tensile(webbing: Webbing, geometry: TackGeometry,
+                         joint_efficiency: Optional[float] = None) -> tuple:
+    """
+    Webbing break at the stitch line (needle holes reduce the webbing's strength).
+
+        F = tensile_strength * eta * layers_per_side
+
+    eta (joint efficiency) is the ratio of sewn-joint to plain-webbing tensile strength. It has
+    no default: it comes from the webbing entry or the joint_efficiency argument and must be
+    measured by destructive test. Without it this mode is not evaluated (strength None).
+
+    Returns (strength_n or None, detail_dict)
+    """
+    eta = joint_efficiency if joint_efficiency is not None else webbing.joint_efficiency
+    layers = geometry.layers_per_side()
+    if eta is None:
+        return None, {"evaluated": False, "joint_efficiency": None, "layers_per_side": layers}
+    if not 0.0 < eta <= 1.0:
+        raise ValueError(f"joint_efficiency must be in (0, 1], got {eta}")
+    strength = webbing.tensile_strength_n * eta * layers
+    return strength, {"evaluated": True, "joint_efficiency": eta, "layers_per_side": layers}
 
 
 # =============================================================================
@@ -631,6 +683,8 @@ class BartackResult:
     tear_out_n: float
     thread_shear_detail: dict
     tear_out_detail: dict
+    webbing_tensile_n: Optional[float]
+    webbing_tensile_detail: dict
 
     # Governing result
     governing_mode: str
@@ -657,6 +711,12 @@ class BartackResult:
     def thread_shear_lbf(self) -> float:
         return from_newtons(self.thread_shear_n, "lbf")
 
+    @property
+    def webbing_tensile_lbf(self) -> Optional[float]:
+        if self.webbing_tensile_n is None:
+            return None
+        return from_newtons(self.webbing_tensile_n, "lbf")
+
 
 def run_calculator(
     thread: Thread,
@@ -664,18 +724,17 @@ def run_calculator(
     geometry: TackGeometry,
     peel: bool,
     safety_factor: float,
+    joint_efficiency: Optional[float] = None,
 ) -> BartackResult:
     """
-    Assemble all inputs, evaluate both failure paths, return governing result.
+    Assemble all inputs, evaluate the failure paths, return the governing result.
+
+    Results are per joint (owner decision 2026-10-31): no per-leg load split is applied.
     """
     warnings = []
 
     # --- Assumption flags ---
-    if thread.elongation_assumed:
-        warnings.append(
-            "A7: Thread elongation at break assumed 0.20 (default). "
-            "Use published spec when available."
-        )
+    # (Former A7, thread elongation, removed: elongation does not enter any formula.)
     if webbing.shear_derived:
         warnings.append(
             "A1: Webbing shear strength derived from tensile via von Mises "
@@ -689,8 +748,8 @@ def run_calculator(
         )
     if geometry.joint_type == "loop":
         warnings.append(
-            "A5: Loop joint: load split 50/50 across two webbing legs assumed "
-            "(symmetric). Verify fold geometry is symmetric in application."
+            "A5: Loop joint: strength is reported per joint (both legs together). "
+            "No per-leg load split is applied."
         )
         warnings.append(
             "A6: Fold-edge stress concentration factor 0.85 applied to "
@@ -700,14 +759,32 @@ def run_calculator(
     # --- Failure mode calculations ---
     f_thread, thread_detail = calc_thread_shear(thread, geometry, peel)
     f_tearout, tearout_detail = calc_tear_out(webbing, geometry)
+    f_webbing, webbing_detail = calc_webbing_tensile(webbing, geometry, joint_efficiency)
 
-    # --- Governing mode ---
-    if f_thread <= f_tearout:
-        governing = "Thread Shear"
-        design_strength = f_thread
-    else:
-        governing = "Tear-Out"
-        design_strength = f_tearout
+    warnings.append(
+        f"A9: Layers per side = {geometry.layers_per_side()} (layer count "
+        f"{geometry.layer_count} split equally between the two sides, odd counts rounded down). "
+        "Tear-out and webbing break run through one side only."
+    )
+    if tearout_detail["capped_at_webbing_tensile"]:
+        warnings.append(
+            "A10: Tear-out capped at webbing tensile strength x layers per side "
+            f"({tearout_detail['tensile_cap_n']:.1f} N; uncapped model value "
+            f"{tearout_detail['uncapped_n']:.1f} N). The cap is a physical upper bound."
+        )
+    if f_webbing is None:
+        warnings.append(
+            "A11: Webbing tensile at the stitch line NOT EVALUATED: joint efficiency not set. "
+            "Measure it by destructive test and pass --joint-efficiency or set it in the "
+            "material library. Until then the result may overstate joint strength."
+        )
+
+    # --- Governing mode (ties go to the earlier mode) ---
+    modes = [("Thread Shear", f_thread), ("Tear-Out", f_tearout)]
+    if f_webbing is not None:
+        modes.append(("Webbing Tensile", f_webbing))
+    governing, design_strength = min(modes, key=lambda m: m[1])
+    if governing == "Tear-Out":
         warnings.append(
             "A8: TEAR-OUT IS THE GOVERNING MODE. The tear-out model assumes "
             "simultaneous full-perimeter failure. In practice, tear-out initiates "
@@ -738,6 +815,8 @@ def run_calculator(
         tear_out_n=f_tearout,
         thread_shear_detail=thread_detail,
         tear_out_detail=tearout_detail,
+        webbing_tensile_n=f_webbing,
+        webbing_tensile_detail=webbing_detail,
         governing_mode=governing,
         design_strength_n=design_strength,
         allowable_load_n=allowable,
@@ -767,7 +846,8 @@ def format_report(r: BartackResult) -> str:
         f"  ({from_mm(r.tack_length_mm, 'in'):.3f} in x "
         f"{from_mm(r.tack_width_mm, 'in'):.3f} in)"
     )
-    lines.append(f"  Layers           : {r.layer_count}")
+    lines.append(f"  Layers           : {r.layer_count}  "
+                 f"({r.tear_out_detail['layers_per_side']} per side)")
     lines.append(f"  Load Angle       : {r.load_angle_deg:.1f} deg")
     lines.append(f"  Peel Loading     : {'Yes' if r.peel else 'No'}")
     lines.append("")
@@ -788,10 +868,20 @@ def format_report(r: BartackResult) -> str:
         f"({r.thread_shear_lbf:>7,.1f} lbf)"
     )
     tearout_flag = "  [UPPER BOUND]" if r.tear_out_detail.get("upper_bound") else ""
+    if r.tear_out_detail.get("capped_at_webbing_tensile"):
+        tearout_flag += " [CAPPED]"
     lines.append(
         f"  Tear-Out      : {r.tear_out_n:>9,.1f} N  "
         f"({r.tear_out_lbf:>7,.1f} lbf){tearout_flag}"
     )
+    if r.webbing_tensile_n is None:
+        lines.append("  Webbing Tens. :  not evaluated (joint efficiency not set)")
+    else:
+        lines.append(
+            f"  Webbing Tens. : {r.webbing_tensile_n:>9,.1f} N  "
+            f"({r.webbing_tensile_lbf:>7,.1f} lbf)  "
+            f"eta {r.webbing_tensile_detail['joint_efficiency']:.2f}"
+        )
     lines.append("")
 
     if r.governing_mode == "Tear-Out":
@@ -841,7 +931,7 @@ def print_report_rich(r: BartackResult) -> None:
         f"{r.tack_length_mm:.1f} mm x {r.tack_width_mm:.1f} mm"
         f" ({from_mm(r.tack_length_mm, 'in'):.3f} in x {from_mm(r.tack_width_mm, 'in'):.3f} in)",
     )
-    inputs.add_row("Layers", str(r.layer_count))
+    inputs.add_row("Layers", f"{r.layer_count} ({r.tear_out_detail['layers_per_side']} per side)")
     inputs.add_row("Load Angle", f"{r.load_angle_deg:.1f} deg")
     inputs.add_row("Peel", "Yes" if r.peel else "No")
     inputs.add_row("", "")
@@ -868,12 +958,18 @@ def print_report_rich(r: BartackResult) -> None:
     )
     console.print(top_grid)
 
-    governing_style = "bold green" if r.governing_mode == "Thread Shear" else "bold yellow"
+    governing_style = "bold yellow" if r.governing_mode == "Tear-Out" else "bold green"
     results = Table(title="Results", box=None, expand=True)
     results.add_column("Metric", style="bold")
     results.add_column("Value")
     results.add_row("Thread Shear", f"{r.thread_shear_n:,.1f} N ({r.thread_shear_lbf:,.1f} lbf)")
-    results.add_row("Tear-Out", f"{r.tear_out_n:,.1f} N ({r.tear_out_lbf:,.1f} lbf) [upper bound]")
+    # "\\[" escapes rich markup so the bracketed flags print
+    capped = " \\[capped]" if r.tear_out_detail.get("capped_at_webbing_tensile") else ""
+    results.add_row("Tear-Out", f"{r.tear_out_n:,.1f} N ({r.tear_out_lbf:,.1f} lbf) \\[upper bound]{capped}")
+    if r.webbing_tensile_n is None:
+        results.add_row("Webbing Tensile", "not evaluated (joint efficiency not set)")
+    else:
+        results.add_row("Webbing Tensile", f"{r.webbing_tensile_n:,.1f} N ({r.webbing_tensile_lbf:,.1f} lbf)")
     results.add_row("Governing Mode", f"[{governing_style}]{r.governing_mode}[/{governing_style}]")
     results.add_row("Design Strength", f"{r.design_strength_n:,.1f} N ({r.design_strength_lbf:,.1f} lbf)")
     results.add_row("Safety Factor", f"{r.safety_factor:.1f}")
@@ -896,9 +992,11 @@ def result_to_json(r: BartackResult) -> str:
             "tack_length_mm": r.tack_length_mm,
             "tack_width_mm": r.tack_width_mm,
             "layer_count": r.layer_count,
+            "layers_per_side": r.tear_out_detail["layers_per_side"],
             "load_angle_deg": r.load_angle_deg,
             "peel": r.peel,
             "safety_factor": r.safety_factor,
+            "joint_efficiency": r.webbing_tensile_detail["joint_efficiency"],
         },
         "failure_modes": {
             "thread_shear_n": round(r.thread_shear_n, 2),
@@ -906,6 +1004,12 @@ def result_to_json(r: BartackResult) -> str:
             "tear_out_n": round(r.tear_out_n, 2),
             "tear_out_lbf": round(r.tear_out_lbf, 2),
             "tear_out_upper_bound": True,
+            "tear_out_uncapped_n": r.tear_out_detail["uncapped_n"],
+            "tear_out_capped_at_webbing_tensile": r.tear_out_detail["capped_at_webbing_tensile"],
+            "webbing_tensile_n": (None if r.webbing_tensile_n is None
+                                  else round(r.webbing_tensile_n, 2)),
+            "webbing_tensile_lbf": (None if r.webbing_tensile_lbf is None
+                                    else round(r.webbing_tensile_lbf, 2)),
         },
         "result": {
             "governing_mode": r.governing_mode,
@@ -1075,6 +1179,20 @@ def interactive_mode() -> BartackResult:
         except ValueError:
             print("  Enter a positive number.")
 
+    eta_default = webbing.joint_efficiency  # None: no default shown; blank input = not measured
+    while True:
+        raw = prompt("Joint efficiency eta, 0-1 (blank = not measured)", default=eta_default)
+        if raw == "":
+            eta = None
+            break
+        try:
+            eta = float(raw)
+            if not 0.0 < eta <= 1.0:
+                raise ValueError()
+            break
+        except ValueError:
+            print("  Enter a number in (0, 1], or leave blank.")
+
     geometry = TackGeometry(
         joint_type=jt,
         tack_length_mm=tl,
@@ -1087,7 +1205,7 @@ def interactive_mode() -> BartackResult:
         load_angle_deg=angle,
     )
 
-    return run_calculator(thread, webbing, geometry, peel, sf)
+    return run_calculator(thread, webbing, geometry, peel, sf, joint_efficiency=eta)
 
 
 # =============================================================================
@@ -1129,7 +1247,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--zigzag-passes", type=int, default=1,
                    help="Number of zigzag passes (default: 1)")
     p.add_argument("--layers", type=int, default=2,
-                   help="Total webbing layers through tack (default: 2)")
+                   help="Total webbing layers through tack (default: 2); "
+                        "tear-out and webbing break use layers // 2 per side")
+    p.add_argument("--joint-efficiency", type=float, default=None, metavar="ETA",
+                   help="Sewn-joint / plain webbing tensile ratio, 0-1, from destructive test. "
+                        "Overrides the library value. Without it the webbing tensile mode "
+                        "is not evaluated.")
     p.add_argument("--load-angle", type=float, default=0.0,
                    help="Load angle in degrees from tack long axis (default: 0)")
     p.add_argument("--peel", action="store_true",
@@ -1199,6 +1322,10 @@ def main():
             parser.error("--zigzag-passes must be >= 0")
         if (args.straight_rows + args.zigzag_passes) <= 0:
             parser.error("--straight-rows + --zigzag-passes must be > 0")
+        if args.layers < 1:
+            parser.error("--layers must be >= 1")
+        if args.joint_efficiency is not None and not 0.0 < args.joint_efficiency <= 1.0:
+            parser.error("--joint-efficiency must be in (0, 1]")
 
         geometry = TackGeometry(
             joint_type=args.joint,
@@ -1216,6 +1343,7 @@ def main():
             thread, webbing, geometry,
             peel=args.peel,
             safety_factor=args.safety_factor,
+            joint_efficiency=args.joint_efficiency,
         )
 
     # --- Output ---

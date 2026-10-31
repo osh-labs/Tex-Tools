@@ -58,7 +58,8 @@
       "thickness_mm": 1.1,
       "construction": "flat",
       "shear_strength_n_per_mm": null,
-      "generic_spec": true
+      "generic_spec": true,
+      "joint_efficiency": null
     },
     "1.5in_mil17337": {
       "name": "1.5-inch Nylon Webbing (MIL-PRF-17337G Cl.3)",
@@ -68,7 +69,8 @@
       "thickness_mm": 1.1,
       "construction": "flat",
       "shear_strength_n_per_mm": null,
-      "generic_spec": true
+      "generic_spec": true,
+      "joint_efficiency": null
     },
     "2in_mil17337": {
       "name": "2-inch Nylon Webbing (MIL-PRF-17337G Cl.4)",
@@ -78,7 +80,8 @@
       "thickness_mm": 1.1,
       "construction": "flat",
       "shear_strength_n_per_mm": null,
-      "generic_spec": true
+      "generic_spec": true,
+      "joint_efficiency": null
     },
     "1in_aa55301_type3": {
       "name": "1-inch Nylon Webbing (A-A-55301A Type 3 Standard)",
@@ -88,7 +91,8 @@
       "thickness_mm": 1.2,
       "construction": "flat",
       "shear_strength_n_per_mm": null,
-      "generic_spec": true
+      "generic_spec": true,
+      "joint_efficiency": null
     }
   }
 }
